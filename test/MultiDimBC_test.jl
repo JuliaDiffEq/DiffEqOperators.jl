@@ -4,16 +4,16 @@ using LinearAlgebra, DiffEqOperators, Random, Test
 ################################################################################
 
 #Create Array
-n = 8
-m = 15
+n = 100
+m = 120
 A = rand(n,m)
 
 #Create atomic BC
-q1 = RobinBC([1.0, 2.0, 3.0], [0.0, -1.0, 2.0], 0.1, 4.0)
+q1 = RobinBC([1.0, 2.0, 3.0], [0.0, -1.0, 2.0], [0.1, 0.1], 4.0)
 q2 = PeriodicBC{Float64}()
 
-BCx = vcat(fill(q1, div(m,2)), fill(q2, m-div(m,2)))  #The size of BCx has to be all size components *except* for x
-BCy = vcat(fill(q1, div(n,2)), fill(q2, n-div(n,2)))
+BCx = vcat(fill(q1, div(m,2)), fill(q2, div(m,2)))  #The size of BCx has to be all size components *except* for x
+BCy = vcat(fill(q1, div(n,2)), fill(q2, div(n,2)))
 
 
 Qx = MultiDimBC(BCx, 1)
@@ -38,26 +38,42 @@ end
 ################################################################################
 
 #Create Array
-n = 8
-m = 11
-o = 12
+n = 100
+m = 120
+o = 78
 A = rand(n,m, o)
 
 #Create atomic BC
-q1 = RobinBC([1.0, 2.0, 3.0], [0.0, -1.0, 2.0], 0.1, 4.0)
+q1 = RobinBC([1.0, 2.0, 3.0], [0.0, -1.0, 2.0], [0.1, 0.1], 4.0)
 q2 = PeriodicBC{Float64}()
 
-BCx = vcat(fill(q1, (div(m,2), o)), fill(q2, (m-div(m,2), o)))  #The size of BCx has to be all size components *except* for x
-BCy = vcat(fill(q1, (div(n,2), o)), fill(q2, (n-div(n,2), o)))
-BCz = fill(Dirichlet0BC(Float64), (n,m))
+BCx = vcat(fill(q1, (div(m,2), o)), fill(q2, (div(m,2), o)))  #The size of BCx has to be all size components *except* for x
+BCy = vcat(fill(q1, (div(n,2), o)), fill(q2, (div(n,2), o)))
+BCz = fill(MixedBC(q1,q2), (n,m))
 
 Qx = MultiDimBC(BCx, 1)
 Qy = MultiDimBC(BCy, 2)
-Qz = MultiDimBC(Dirichlet0BC(Float64), size(A), 3) #Test the other constructor
+Qz = MultiDimBC(MixedBC(q1, q2), size(A), 3) #Test the other constructor
 
 Ax = Qx*A
 Ay = Qy*A
 Az = Qz*A
+# Test padded array compositions
+Aextended = compose(Ax,Ay,Az)
+Aflipextended = compose(Az,Ax,Ay)
+@test_broken compose(Ax, Az, Az)
+
+#test BC compositions
+Q = compose(Qx,Qy,Qz)
+@test_broken compose(Qx, Qx, Qz)
+Qflip = compose(Qz, Qy, Qx)
+QA = Q*A
+QflipA = Qflip*A
+for i in 1:(n+2), j in 1:(m+2), k in 1:(o+2)
+    @test QA[i,j,k] = QFlipA[i,j,k]
+    @test Aextended[i,j,k] == QA[i,j,k]
+    @test Aextended[i,j,k] == Aflipextended[i,j,k]
+end
 
 @test size(Ax)[1] == size(A)[1]+2
 @test size(Ay)[2] == size(A)[2]+2
@@ -70,19 +86,4 @@ for i in 1:n, k in 1:o
 end
 for i in 1:n, j in 1:m
     @test Az[i, j, :] == Array(BCz[i, j]*A[i, j, :])
-end
-
-#test compositions to higher dimension
-for N in 2:7
-    sizes = rand(4:7, N)
-    A = rand(sizes...)
-
-    Q1_N = Neumann0BC(Float64, Tuple(ones(N)), 3.0, size(A))
-
-    Q = compose(Q1_N...)
-
-    A1_N = Q1_N.*fill(A, N)
-
-    A_extended = Q*A
-    @test Array(A_extended) == Array(compose(A1_N...))
 end

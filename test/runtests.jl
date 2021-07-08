@@ -36,8 +36,8 @@ if GROUP == "All" || GROUP == "OperatorInterface"
 end
 
 if GROUP == "All" || GROUP == "MOLFiniteDifference"
-    @time @safetestset "MOLFiniteDifference Interface" begin include("MOL/MOLtest.jl") end
-    #@time @safetestset "MOLFiniteDifference Interface: Linear Convection" begin include("MOL/MOL_1D_Linear_Convection.jl") end
+    # @time @safetestset "MOLFiniteDifference Interface" begin include("MOL/MOLtest.jl") end
+    @time @safetestset "MOLFiniteDifference Interface: Linear Convection" begin include("MOL/MOL_1D_Linear_Convection.jl") end
     @time @safetestset "MOLFiniteDifference Interface: 1D Linear Diffusion" begin include("MOL/MOL_1D_Linear_Diffusion.jl") end
     @time @safetestset "MOLFiniteDifference Interface: 1D Non-Linear Diffusion" begin include("MOL/MOL_1D_NonLinear_Diffusion.jl") end
     @time @safetestset "MOLFiniteDifference Interface: 2D Diffusion" begin include("MOL/MOL_2D_Diffusion.jl") end

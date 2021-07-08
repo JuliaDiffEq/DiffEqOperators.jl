@@ -35,10 +35,11 @@ using ModelingToolkit: Differential
 
     # Space and time domains
     domains = [t ∈ Interval(t_min,t_max),
-            x ∈ Interval(x_min,x_max),
-            y ∈ Interval(y_min,y_max)]
+               x ∈ Interval(x_min,x_max),
+               y ∈ Interval(y_min,y_max)]
 
-    # Space and time domains
+
+    # PDE system
     pdesys = PDESystem([eq],bcs,domains,[t,x,y],[u(t,x,y)])
 
     dx = 0.1; dy = 0.2
@@ -99,8 +100,8 @@ end
 
     # Space and time domains
     domains = [t ∈ Interval(t_min,t_max),
-            x ∈ Interval(x_min,x_max),
-            y ∈ Interval(y_min,y_max)]
+               x ∈ Interval(x_min,x_max),
+               y ∈ Interval(y_min,y_max)]
 
     # Space and time domains
     pdesys = PDESystem([eq],bcs,domains,[t,x,y],[u(t,x,y)])

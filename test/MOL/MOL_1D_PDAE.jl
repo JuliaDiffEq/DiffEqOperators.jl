@@ -18,8 +18,8 @@ using ModelingToolkit: Differential
     Dxx = Dx^2
 
     # 1D PDE and boundary conditions
-    eqs = [Dt(u(t,x)) ~ Dxx(u(t,x)),
-           0 ~ Dxx(v(t,x)) + exp(-t)*sin(x)]
+    eqs = [0 ~ Dxx(v(t,x)) + exp(-t)*sin(x),
+           Dt(u(t,x)) ~ Dxx(u(t,x))]
     bcs = [u(0,x) ~ cos(x),
            v(0,x) ~ sin(x),
            u(t,0) ~ exp(-t),

@@ -1,3 +1,4 @@
+#using ModelingToolkit: operation, istree, arguments, Interval, infimum, supremum
 using ModelingToolkit: operation, istree, arguments
 import DomainSets
 
@@ -91,7 +92,9 @@ function SciMLBase.symbolic_discretize(pdesys::ModelingToolkit.PDESystem,discret
             space = map(nottime) do x
                 xdomain = pdesys.domain[findfirst(d->isequal(x, d.variables),pdesys.domain)]
                 dx = discretization.dxs[findfirst(dxs->isequal(x, dxs[1].val),discretization.dxs)][2]
+
                 dx isa Number ? (DomainSets.infimum(xdomain.domain):dx:DomainSets.supremum(xdomain.domain)) : dx
+
             end
             dxs = map(nottime) do x        
                 dx = discretization.dxs[findfirst(dxs->isequal(x, dxs[1].val),discretization.dxs)][2]
@@ -188,7 +191,9 @@ function SciMLBase.symbolic_discretize(pdesys::ModelingToolkit.PDESystem,discret
             for bc in pdesys.bcs
                 bcdepvar = first(get_depvars(bc.lhs, depvar_ops))
                 if any(u->isequal(operation(u),operation(bcdepvar)),depvars)
+
                     if t != nothing && operation(bc.lhs) isa Sym && !any(x -> isequal(x, t.val), arguments(bc.lhs))
+
                         # initial condition
                         # Assume in the form `u(...) ~ ...` for now
                         i = findfirst(isequal(bc.lhs),initmaps)
@@ -258,7 +263,7 @@ function SciMLBase.symbolic_discretize(pdesys::ModelingToolkit.PDESystem,discret
             Imax(order) = last(grid_indices) - I1 * (order÷2)
 
             interior = grid_indices[[let bcs = get_bc_counts(i)
-                                    (1 + first(bcs)):length(g)-last(bcs)
+                                    (1 + first(bcs)):length(g)-last(bcs)#-1
                                     end
                                     for (i,g) in enumerate(grid)]...]
             eqs = vec(map(interior) do II
@@ -291,16 +296,19 @@ function SciMLBase.symbolic_discretize(pdesys::ModelingToolkit.PDESystem,discret
                 central_deriv_rules_spherical = [Differential(s)(s^2*Differential(s)(u))/s^2 => central_deriv_spherical(II,j,k) 
                                                 for (j,s) in enumerate(nottime), (k,u) in enumerate(depvars)]
                 
+                # Val rules ############################################################
                 valrules = vcat([depvars[k] => depvarsdisc[k][II] for k in 1:length(depvars)],
                                 [nottime[j] => grid[j][II[j]] for j in 1:nspace])
-            
-                # TODO: upwind rules needs interpolation into `@rule`
-                forward_weights(II,j) = DiffEqOperators.calculate_weights(discretization.upwind_order, 0.0, grid[j][[II[j],II[j]+1]])
+
+                # Upwind rules #########################################################
                 reverse_weights(II,j) = DiffEqOperators.calculate_weights(discretization.upwind_order, 0.0, grid[j][[II[j]-1,II[j]]])
-                # upwinding_rules = [@rule(*(~~a,$(Differential(nottime[j]))(u),~~b) => IfElse.ifelse(*(~~a..., ~~b...,)>0,
-                #                         *(~~a..., ~~b..., dot(reverse_weights(II,j),depvars[k][central_neighbor_idxs(II,j)[1:2]])),
-                #                         *(~~a..., ~~b..., dot(forward_weights(II,j),depvars[k][central_neighbor_idxs(II,j)[2:3]]))))
-                #                         for j in 1:nspace, k in 1:length(pdesys.depvars)]
+                forward_weights(II,j) = DiffEqOperators.calculate_weights(discretization.upwind_order, 0.0, grid[j][[II[j],II[j]+1]])
+                #forward_weights(II,j) = -1.0 * reverse_weights(II,j) # TODO: check this function
+                side = 1.0
+                upwinding_rules_tmp = [@rule(*(~~a,$(Differential(iv))(dv),~~b) => Base.ifelse(*(side, ~~a..., ~~b...,)>0,
+                                             *(~~a..., ~~b..., dot(reverse_weights(II,j),depvarsdisc[k][central_neighbor_idxs(II,j,approx_order)[1:2]])),
+                                             *(~~a..., ~~b..., dot(forward_weights(II,j),depvarsdisc[k][central_neighbor_idxs(II,j,approx_order)[2:3]]))))
+                                             for (j, iv) in enumerate(nottime) for (k, dv) in enumerate(depvars)]
 
                 ## Discretization of non-linear laplacian. 
                 # d/dx( a du/dx ) ~ (a(x+1/2) * (u[i+1] - u[i]) - a(x-1/2) * (u[i] - u[i-1]) / dx^2
@@ -315,28 +323,52 @@ function SciMLBase.symbolic_discretize(pdesys::ModelingToolkit.PDESystem,discret
                 # Independent variable rules
                 r_mid_indep(II, j, l) = [nottime[j] => iv_mid(II, j, l) for j in 1:length(nottime)]
                 # Replacement rules: new approach
-                rules = [@rule ($(Differential(iv))(*(~~a, $(Differential(iv))(dv), ~~b))) =>
-                        dot([Num(substitute(substitute(*(~~a..., ~~b...), r_mid_dep(II, j, k, -1)), r_mid_indep(II, j, -1))),
-                            Num(substitute(substitute(*(~~a..., ~~b...), r_mid_dep(II, j, k, 1)), r_mid_indep(II, j, 1)))],
-                            [-b1(II, j, k), b2(II, j, k)])
-                        for (j, iv) in enumerate(nottime) for (k, dv) in enumerate(depvars)]
-                rhs_arg = istree(eq.rhs) && (SymbolicUtils.operation(eq.rhs) == +) ? SymbolicUtils.arguments(eq.rhs) : [eq.rhs]
-                lhs_arg = istree(eq.lhs) && (SymbolicUtils.operation(eq.lhs) == +) ? SymbolicUtils.arguments(eq.lhs) : [eq.lhs]
+                nonlinlap_rules_tmp = [@rule ($(Differential(iv))(*(~~a, $(Differential(iv))(dv), ~~b))) =>
+                                       dot([Num(substitute(substitute(*(~~a..., ~~b...), r_mid_dep(II, j, k, -1)), r_mid_indep(II, j, -1))),
+                                            Num(substitute(substitute(*(~~a..., ~~b...), r_mid_dep(II, j, k, 1)), r_mid_indep(II, j, 1)))],
+                                           [-b1(II, j, k), b2(II, j, k)])
+                                       for (j, iv) in enumerate(nottime) for (k, dv) in enumerate(depvars)]
+
+                # Post-processing @rules for applying `substitute` (see below) #########
+                lhs_arg = (SymbolicUtils.istree(eq.lhs) && SymbolicUtils.operation(eq.lhs) == +) ?
+                           SymbolicUtils.arguments(eq.lhs) : [eq.lhs]
+                rhs_arg = (SymbolicUtils.istree(eq.rhs) && SymbolicUtils.operation(eq.rhs) == +) ?
+                           SymbolicUtils.arguments(eq.rhs) : [eq.rhs]
                 nonlinlap_rules = []
+                lhs_upwinding_rules = []
+                rhs_upwinding_rules = []
+                for t in vcat(lhs_arg)
+                    side = 1.0
+                    for r in upwinding_rules_tmp
+                        if r(t) != nothing
+                            push!(lhs_upwinding_rules, t => r(t))
+                        end
+                    end
+                end
+                for t in vcat(rhs_arg)
+                    side = -1.0
+                    for r in upwinding_rules_tmp
+                        if r(t) != nothing
+                            push!(rhs_upwinding_rules, t => r(t))
+                        end
+                    end
+                end
                 for t in vcat(lhs_arg,rhs_arg)
-                    for r in rules
-                        if r(t) !== nothing
+                    for r in nonlinlap_rules_tmp
+                        if r(t) != nothing
                             push!(nonlinlap_rules, t => r(t))
                         end
                     end
                 end
 
+                # Applying rules to the equation #######################################
                 rules = vcat(vec(nonlinlap_rules),
-                            vec(central_deriv_rules_cartesian),
-                            vec(central_deriv_rules_spherical),
-                            valrules)
-
-                substitute(eq.lhs,rules) ~ substitute(eq.rhs,rules)
+                             vec(central_deriv_rules_cartesian),
+                             vec(central_deriv_rules_spherical),
+                             valrules)
+                lhs_tmp = substitute(eq.lhs,lhs_upwinding_rules)
+                rhs_tmp = substitute(eq.rhs,rhs_upwinding_rules)
+                substitute(lhs_tmp,rules) ~ substitute(rhs_tmp,rules)
 
             end)
             push!(alleqs,eqs)
@@ -374,3 +406,4 @@ function SciMLBase.discretize(pdesys::ModelingToolkit.PDESystem,discretization::
         return prob = ODEProblem(simpsys,Pair[],tspan)
     end
 end
+
